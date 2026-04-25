@@ -86,7 +86,13 @@ export default function Editor() {
   }
 
   useEffect(() => {
-    const socket = io(import.meta.env.VITE_BACKEND_URL || window.location.origin)
+    const socket = io(import.meta.env.VITE_BACKEND_URL || window.location.origin, {
+  transports: ['websocket'],
+  reconnection: true,
+  reconnectionAttempts: 10,
+  reconnectionDelay: 1000,
+  timeout: 20000
+})
     socketRef.current = socket
 
     const view = new EditorView({
@@ -180,17 +186,28 @@ export default function Editor() {
   }, [language])
 
   function sendOp(op) {
-    if (!pendingOpRef.current) {
-      pendingOpRef.current = op
-      socketRef.current.emit('operation', {
-        room_id: roomId,
-        op,
-        revision: revisionRef.current
-      })
-    } else {
-      bufferedOpRef.current = op
-    }
+  if (!pendingOpRef.current) {
+    pendingOpRef.current = op
+    socketRef.current.emit('operation', {
+      room_id: roomId,
+      op,
+      revision: revisionRef.current
+    })
+    // If ack doesn't come back in 3 seconds, clear pending and retry
+    setTimeout(() => {
+      if (pendingOpRef.current === op) {
+        pendingOpRef.current = null
+        if (bufferedOpRef.current) {
+          const buffered = bufferedOpRef.current
+          bufferedOpRef.current = null
+          sendOp(buffered)
+        }
+      }
+    }, 3000)
+  } else {
+    bufferedOpRef.current = op
   }
+}
 
   function copyLink() {
     navigator.clipboard.writeText(window.location.href)
