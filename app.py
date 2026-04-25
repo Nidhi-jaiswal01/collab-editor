@@ -4,6 +4,8 @@ import room_manager
 import database
 from ot_engine import transform_against_history, apply_op
 import os
+import threading
+import time
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "collab-secret"
@@ -115,6 +117,16 @@ def on_cursor(data):
         "line": data["line"],
         "ch": data["ch"]
     }, to=room_id, include_self=False)
+
+def cleanup_expired_rooms():
+    while True:
+        time.sleep(3600)  # wait 1 hour
+        print("Running room cleanup...")
+        database.delete_expired_rooms()
+
+# Start cleanup thread in background
+cleanup_thread = threading.Thread(target=cleanup_expired_rooms, daemon=True)
+cleanup_thread.start()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 7860))
