@@ -62,6 +62,9 @@ def on_disconnect():
     room_id, username = room_manager.find_user_room(sid)
     if room_id:
         room_manager.remove_user(room_id, sid)
+        # If no users left, save to Supabase immediately
+        if len(room_manager.get_users(room_id)) == 0:
+            room_manager.save_room_now(room_id)
         emit("user_left", {
             "username": username,
             "users": room_manager.get_users(room_id)
