@@ -111,9 +111,12 @@ def on_cursor(data):
     room = room_manager.get_room(room_id)
     if not room:
         return
-    username = room_manager.active_users.get(room_id, {}).get(request.sid, "?")
+    user = room_manager.active_users.get(room_id, {}).get(request.sid)
+    if not user:
+        return
     emit("cursor", {
-        "username": username,
+        "username": user["username"],
+        "color": user["color"],
         "line": data["line"],
         "ch": data["ch"]
     }, to=room_id, include_self=False)

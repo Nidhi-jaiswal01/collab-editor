@@ -87,12 +87,12 @@ export default function Editor() {
 
   useEffect(() => {
     const socket = io(import.meta.env.VITE_BACKEND_URL || window.location.origin, {
-  transports: ['websocket'],
-  reconnection: true,
-  reconnectionAttempts: 10,
-  reconnectionDelay: 1000,
-  timeout: 20000
-})
+      transports: ['websocket'],
+      reconnection: true,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 1000,
+      timeout: 20000
+    })
     socketRef.current = socket
 
     const view = new EditorView({
@@ -165,7 +165,7 @@ export default function Editor() {
     socket.on('cursor', (data) => {
       setCursors(prev => ({
         ...prev,
-        [data.username]: { line: data.line, ch: data.ch }
+        [data.username]: { line: data.line, ch: data.ch, color: data.color }
       }))
     })
 
@@ -175,7 +175,6 @@ export default function Editor() {
     }
   }, [roomId])
 
-  // Rebuild editor when language changes
   useEffect(() => {
     if (!viewRef.current) return
     languageRef.current = language
@@ -186,28 +185,27 @@ export default function Editor() {
   }, [language])
 
   function sendOp(op) {
-  if (!pendingOpRef.current) {
-    pendingOpRef.current = op
-    socketRef.current.emit('operation', {
-      room_id: roomId,
-      op,
-      revision: revisionRef.current
-    })
-    // If ack doesn't come back in 3 seconds, clear pending and retry
-    setTimeout(() => {
-      if (pendingOpRef.current === op) {
-        pendingOpRef.current = null
-        if (bufferedOpRef.current) {
-          const buffered = bufferedOpRef.current
-          bufferedOpRef.current = null
-          sendOp(buffered)
+    if (!pendingOpRef.current) {
+      pendingOpRef.current = op
+      socketRef.current.emit('operation', {
+        room_id: roomId,
+        op,
+        revision: revisionRef.current
+      })
+      setTimeout(() => {
+        if (pendingOpRef.current === op) {
+          pendingOpRef.current = null
+          if (bufferedOpRef.current) {
+            const buffered = bufferedOpRef.current
+            bufferedOpRef.current = null
+            sendOp(buffered)
+          }
         }
-      }
-    }, 3000)
-  } else {
-    bufferedOpRef.current = op
+      }, 3000)
+    } else {
+      bufferedOpRef.current = op
+    }
   }
-}
 
   function copyLink() {
     navigator.clipboard.writeText(window.location.href)
@@ -225,39 +223,37 @@ export default function Editor() {
   }
 
   async function runCode() {
-  if (!viewRef.current) return
-  const code = viewRef.current.state.doc.toString()
-  setIsRunning(true)
-  setOutput('')
+    if (!viewRef.current) return
+    const code = viewRef.current.state.doc.toString()
+    setIsRunning(true)
+    setOutput('')
 
-  if (language === 'javascript') {
-    try {
-      const logs = []
-      const originalLog = console.log
-      console.log = (...args) => logs.push(args.map(String).join(' '))
-      eval(code)
-      console.log = originalLog
-      setOutput(logs.join('\n') || 'Code ran successfully with no output.')
-    } catch (err) {
-      setOutput(`Error: ${err.message}`)
-    }
-    setIsRunning(false)
-    return
-  }
-
-  if (language === 'python') {
-    try {
-      if (!window.pyodide) {
-        setOutput('Loading Python runtime... (first time only, ~10 seconds)')
-        const script = document.createElement('script')
-        script.src = 'https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js'
-        document.head.appendChild(script)
-        await new Promise(resolve => script.onload = resolve)
-        window.pyodide = await window.loadPyodide()
+    if (language === 'javascript') {
+      try {
+        const logs = []
+        const originalLog = console.log
+        console.log = (...args) => logs.push(args.map(String).join(' '))
+        eval(code)
+        console.log = originalLog
+        setOutput(logs.join('\n') || 'Code ran successfully with no output.')
+      } catch (err) {
+        setOutput(`Error: ${err.message}`)
       }
+      setIsRunning(false)
+      return
+    }
 
-      // Capture stdout properly using StringIO
-      const output = await window.pyodide.runPythonAsync(`
+    if (language === 'python') {
+      try {
+        if (!window.pyodide) {
+          setOutput('Loading Python runtime... (first time only, ~10 seconds)')
+          const script = document.createElement('script')
+          script.src = 'https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js'
+          document.head.appendChild(script)
+          await new Promise(resolve => script.onload = resolve)
+          window.pyodide = await window.loadPyodide()
+        }
+        const output = await window.pyodide.runPythonAsync(`
 import sys
 from io import StringIO
 _stdout = StringIO()
@@ -267,14 +263,14 @@ ${code.split('\n').map(line => '    ' + line).join('\n')}
 finally:
     sys.stdout = sys.__stdout__
 _stdout.getvalue()
-      `)
-      setOutput(output || 'Code ran successfully with no output.')
-    } catch (err) {
-      setOutput(`Error: ${err.message}`)
+        `)
+        setOutput(output || 'Code ran successfully with no output.')
+      } catch (err) {
+        setOutput(`Error: ${err.message}`)
+      }
+      setIsRunning(false)
     }
-    setIsRunning(false)
   }
-}
 
   return (
     <div className="h-screen bg-gray-950 flex flex-col">
@@ -308,10 +304,11 @@ _stdout.getvalue()
           {users.map((u, i) => (
             <div
               key={i}
-              className="w-7 h-7 rounded-full bg-purple-700 flex items-center justify-center text-xs font-medium text-white"
-              title={u}
+              className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-medium text-white"
+              style={{ background: u.color }}
+              title={u.username}
             >
-              {getInitials(u)}
+              {getInitials(u.username)}
             </div>
           ))}
         </div>
@@ -324,8 +321,12 @@ _stdout.getvalue()
           {Object.entries(cursors).map(([name, pos]) => (
             <div
               key={name}
-              className="absolute pointer-events-none text-xs bg-purple-600 text-white px-1.5 py-0.5 rounded font-medium"
-              style={{ top: `${pos.line * 20 + 8}px`, left: `${pos.ch * 8 + 16}px` }}
+              className="absolute pointer-events-none text-xs text-white px-1.5 py-0.5 rounded font-medium"
+              style={{
+                top: `${pos.line * 20 + 8}px`,
+                left: `${pos.ch * 8 + 16}px`,
+                background: pos.color || '#7C3AED'
+              }}
               title={name}
             >
               {getInitials(name)}
