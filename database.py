@@ -1,75 +1,51 @@
-import sqlite3
-import json
 import os
+from supabase import create_client
+from dotenv import load_dotenv
+import json
 
-DB_PATH = os.path.join(os.path.dirname(__file__), 'collab.db')
+load_dotenv()
 
-def get_conn():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+url = os.environ.get("SUPABASE_URL")
+key = os.environ.get("SUPABASE_KEY")
+supabase = create_client(url, key)
 
 def init_db():
-    conn = get_conn()
-    conn.execute('''
-        CREATE TABLE IF NOT EXISTS rooms (
-            room_id TEXT PRIMARY KEY,
-            content TEXT DEFAULT '',
-            revision INTEGER DEFAULT 0,
-            history TEXT DEFAULT '[]',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    conn.commit()
-    conn.close()
+    # Supabase table already created via SQL editor
+    pass
 
 def room_exists(room_id):
-    conn = get_conn()
-    row = conn.execute(
-        'SELECT room_id FROM rooms WHERE room_id = ?', (room_id,)
-    ).fetchone()
-    conn.close()
-    return row is not None
+    result = supabase.table("rooms").select("room_id").eq("room_id", room_id).execute()
+    return len(result.data) > 0
 
 def create_room(room_id):
-    conn = get_conn()
-    conn.execute(
-        'INSERT OR IGNORE INTO rooms (room_id) VALUES (?)', (room_id,)
-    )
-    conn.commit()
-    conn.close()
+    supabase.table("rooms").upsert({
+        "room_id": room_id,
+        "content": "",
+        "revision": 0,
+        "history": []
+    }).execute()
 
 def get_room(room_id):
-    conn = get_conn()
-    row = conn.execute(
-        'SELECT * FROM rooms WHERE room_id = ?', (room_id,)
-    ).fetchone()
-    conn.close()
-    if row:
+    result = supabase.table("rooms").select("*").eq("room_id", room_id).execute()
+    if result.data:
+        row = result.data[0]
         return {
-            'room_id': row['room_id'],
-            'content': row['content'],
-            'revision': row['revision'],
-            'history': json.loads(row['history']),
+            "room_id": row["room_id"],
+            "content": row["content"],
+            "revision": row["revision"],
+            "history": row["history"] if isinstance(row["history"], list) else json.loads(row["history"])
         }
     return None
 
 def update_room(room_id, content, revision, history):
-    conn = get_conn()
-    conn.execute('''
-        UPDATE rooms
-        SET content = ?, revision = ?, history = ?, last_active = CURRENT_TIMESTAMP
-        WHERE room_id = ?
-    ''', (content, revision, json.dumps(history), room_id))
-    conn.commit()
-    conn.close()
+    supabase.table("rooms").update({
+        "content": content,
+        "revision": revision,
+        "history": history,
+        "last_active": "now()"
+    }).eq("room_id", room_id).execute()
 
 def touch_room(room_id):
-    conn = get_conn()
-    conn.execute(
-        'UPDATE rooms SET last_active = CURRENT_TIMESTAMP WHERE room_id = ?',
-        (room_id,)
-    )
-    conn.commit()
-    conn.close()
+    supabase.table("rooms").update({
+        "last_active": "now()"
+    }).eq("room_id", room_id).execute()
