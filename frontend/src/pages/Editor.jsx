@@ -2,10 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { io } from 'socket.io-client'
 import { EditorView, basicSetup } from 'codemirror'
+import { keymap } from '@codemirror/view'
 import { EditorState } from '@codemirror/state'
 import { python } from '@codemirror/lang-python'
 import { javascript } from '@codemirror/lang-javascript'
 import { oneDark } from '@codemirror/theme-one-dark'
+import { indentWithTab } from '@codemirror/commands'
 
 export default function Editor() {
   const { roomId } = useParams()
@@ -30,7 +32,6 @@ export default function Editor() {
     const socket = io()
     socketRef.current = socket
 
-    // Set up CodeMirror
     const view = new EditorView({
       state: EditorState.create({
         doc: '',
@@ -38,6 +39,16 @@ export default function Editor() {
           basicSetup,
           oneDark,
           python(),
+          EditorView.theme({
+            "&": { fontSize: "14px" },
+            ".cm-content": {
+              fontFamily: "JetBrains Mono, Fira Code, monospace",
+              padding: "10px 0"
+            },
+            ".cm-line": { padding: "0 16px" },
+          }),
+          EditorState.tabSize.of(4),
+          keymap.of([indentWithTab]),
           EditorView.updateListener.of((update) => {
             if (!update.docChanged || suppressRef.current) return
             update.transactions.forEach(tr => {
@@ -166,6 +177,15 @@ export default function Editor() {
     setTimeout(() => setCopied(false), 2000)
   }
 
+  function getInitials(name) {
+    return name
+      .split(' ')
+      .map(w => w[0])
+      .join('')
+      .toUpperCase()
+      .slice(0, 2)
+  }
+
   return (
     <div className="h-screen bg-gray-950 flex flex-col">
       {/* Topbar */}
@@ -194,7 +214,7 @@ export default function Editor() {
               className="w-7 h-7 rounded-full bg-purple-700 flex items-center justify-center text-xs font-medium text-white"
               title={u}
             >
-              {u[0].toUpperCase()}
+              {getInitials(u)}
             </div>
           ))}
         </div>
@@ -207,10 +227,11 @@ export default function Editor() {
         {Object.entries(cursors).map(([name, pos]) => (
           <div
             key={name}
-            className="absolute pointer-events-none text-xs bg-purple-600 text-white px-1 rounded"
+            className="absolute pointer-events-none text-xs bg-purple-600 text-white px-1.5 py-0.5 rounded font-medium"
             style={{ top: `${pos.line * 20 + 8}px`, left: `${pos.ch * 8 + 16}px` }}
+            title={name}
           >
-            {name}
+            {getInitials(name)}
           </div>
         ))}
       </div>
