@@ -86,7 +86,7 @@ export default function Editor() {
   }
 
   useEffect(() => {
-    const socket = io()
+    const socket = io(import.meta.env.VITE_BACKEND_URL || window.location.origin)
     socketRef.current = socket
 
     const view = new EditorView({
