@@ -1,10 +1,18 @@
 from flask import Flask, request
-from flask_socketio import SocketIO, join_room, emit
+from flask_socketio import SocketIO, join_room, leave_room, emit
 import room_manager
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "collab-secret"
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
+
+@app.route("/")
+def index():
+    return app.send_static_file("index.html")
+
+@app.route("/room/<room_id>")
+def editor(room_id):
+    return app.send_static_file("editor.html")
 
 @socketio.on("join")
 def on_join(data):
