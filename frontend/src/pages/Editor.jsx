@@ -8,11 +8,11 @@ import { javascript } from '@codemirror/lang-javascript'
 import { oneDark } from '@codemirror/theme-one-dark'
 import { indentWithTab } from '@codemirror/commands'
 import { keymap } from '@codemirror/view'
+import { useAuth } from '../context/AuthContext'
 
 export default function Editor() {
   const { roomId } = useParams()
-  const [searchParams] = useSearchParams()
-  const username = searchParams.get('user') || 'Anonymous'
+const { username } = useAuth()
 
   const [users, setUsers] = useState([])
   const [revision, setRevision] = useState(0)

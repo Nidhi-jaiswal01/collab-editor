@@ -1,34 +1,36 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
 
 export default function Lobby() {
-  const [username, setUsername] = useState('')
   const [roomId, setRoomId] = useState('')
+  const { username, signOut } = useAuth()
   const navigate = useNavigate()
 
   function createRoom() {
     const id = crypto.randomUUID().slice(0, 8)
-    const name = username.trim() || 'Anonymous'
-    navigate(`/room/${id}?user=${name}`)
+    navigate(`/room/${id}`)
   }
 
   function joinRoom() {
-    const name = username.trim() || 'Anonymous'
-    if (roomId.trim()) navigate(`/room/${roomId.trim()}?user=${name}`)
+    if (roomId.trim()) navigate(`/room/${roomId.trim()}`)
   }
 
   return (
     <div className="min-h-screen bg-gray-950 flex items-center justify-center">
       <div className="bg-gray-900 border border-gray-800 rounded-2xl p-8 w-full max-w-md">
-        <h1 className="text-2xl font-semibold text-white mb-1">Collab Editor</h1>
-        <p className="text-gray-400 text-sm mb-6">Code together in real time</p>
-
-        <input
-          className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-purple-500 mb-4"
-          placeholder="Your name"
-          value={username}
-          onChange={e => setUsername(e.target.value)}
-        />
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h1 className="text-2xl font-semibold text-white mb-1">Collab Editor</h1>
+            <p className="text-gray-400 text-sm">Hey, <span className="text-purple-400">{username}</span>!</p>
+          </div>
+          <button
+            onClick={signOut}
+            className="text-xs px-3 py-1.5 rounded-md border border-gray-700 text-gray-400 hover:text-white hover:border-gray-500 transition-colors"
+          >
+            Sign out
+          </button>
+        </div>
 
         <button
           onClick={createRoom}
@@ -48,6 +50,7 @@ export default function Lobby() {
           placeholder="Paste room ID"
           value={roomId}
           onChange={e => setRoomId(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && joinRoom()}
         />
 
         <button
