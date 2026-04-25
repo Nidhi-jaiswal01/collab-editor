@@ -52,3 +52,12 @@ def touch_room(room_id):
     supabase.table("rooms").update({
         "last_active": "now()"
     }).eq("room_id", room_id).execute()
+
+def delete_expired_rooms():
+    try:
+        result = supabase.table("rooms").delete().lt(
+            "last_active", "now() - interval '24 hours'"
+        ).execute()
+        print("Deleted expired rooms:", result.data)
+    except Exception as e:
+        print("delete_expired_rooms error:", e)
