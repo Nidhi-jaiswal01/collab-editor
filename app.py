@@ -8,7 +8,7 @@ app = Flask(__name__)
 app.config["SECRET_KEY"] = "collab-secret"
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
 
-dist_dir = os.path.join(os.path.dirname(__file__), 'frontend', 'dist')
+dist_dir = os.path.join(os.path.dirname(__file__), 'dist')
 
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
