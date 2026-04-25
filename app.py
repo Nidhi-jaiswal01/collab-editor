@@ -1,18 +1,11 @@
 from flask import Flask, request
-from flask_socketio import SocketIO, join_room, leave_room, emit
+from flask_socketio import SocketIO, join_room, emit
 import room_manager
+from ot_engine import transform_against_history, apply_op
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "collab-secret"
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
-
-@app.route("/")
-def index():
-    return app.send_static_file("index.html")
-
-@app.route("/room/<room_id>")
-def editor(room_id):
-    return app.send_static_file("editor.html")
 
 @socketio.on("join")
 def on_join(data):
@@ -58,13 +51,40 @@ def on_operation(data):
     if not room:
         return
 
-    room["content"] = data["content"]
-    room["revision"] += 1
+    op = data["op"]
+    client_revision = data["revision"]
 
+    # Transform op against anything that happened since client's revision
+    transformed_op = transform_against_history(
+        op, room["history"], client_revision
+    )
+
+    if transformed_op:
+        room["content"] = apply_op(room["content"], transformed_op)
+        room["history"].append(transformed_op)
+        room["revision"] += 1
+
+    # Send ack to the sender with new revision
+    emit("ack", {"revision": room["revision"]})
+
+    # Broadcast to everyone else
     emit("operation", {
-        "op": data["op"],
+        "op": transformed_op,
         "revision": room["revision"]
     }, to=room_id, include_self=False)
 
+@socketio.on("cursor")
+def on_cursor(data):
+    room_id = data["room_id"]
+    room = room_manager.get_room(room_id)
+    if not room:
+        return
+    username = room["users"].get(request.sid, "?")
+    emit("cursor", {
+        "username": username,
+        "line": data["line"],
+        "ch": data["ch"]
+    }, to=room_id, include_self=False) 
+    
 if __name__ == "__main__":
     socketio.run(app, debug=True, port=5000)
