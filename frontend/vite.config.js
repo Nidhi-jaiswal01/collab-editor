@@ -1,17 +1,13 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { resolve } from 'path'
 
 export default defineConfig({
   plugins: [react()],
-  build: {
-    rollupOptions: {
-      external: ['tslib'],
-      output: {
-        globals: {
-          tslib: 'tslib'
-        }
-      }
-    },
+  resolve: {
+    alias: {
+      tslib: resolve('./node_modules/tslib/tslib.es6.js')
+    }
   },
   server: {
     proxy: {
