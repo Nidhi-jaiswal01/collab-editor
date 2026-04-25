@@ -2,12 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { io } from 'socket.io-client'
 import { EditorView, basicSetup } from 'codemirror'
-import { keymap } from '@codemirror/view'
 import { EditorState } from '@codemirror/state'
 import { python } from '@codemirror/lang-python'
 import { javascript } from '@codemirror/lang-javascript'
 import { oneDark } from '@codemirror/theme-one-dark'
 import { indentWithTab } from '@codemirror/commands'
+import { keymap } from '@codemirror/view'
 
 export default function Editor() {
   const { roomId } = useParams()
@@ -19,6 +19,8 @@ export default function Editor() {
   const [copied, setCopied] = useState(false)
   const [language, setLanguage] = useState('python')
   const [cursors, setCursors] = useState({})
+  const [output, setOutput] = useState('')
+  const [isRunning, setIsRunning] = useState(false)
 
   const socketRef = useRef(null)
   const editorRef = useRef(null)
@@ -27,61 +29,70 @@ export default function Editor() {
   const pendingOpRef = useRef(null)
   const bufferedOpRef = useRef(null)
   const revisionRef = useRef(0)
+  const languageRef = useRef('python')
+
+  function getLanguageExtension(lang) {
+    if (lang === 'javascript') return javascript()
+    return python()
+  }
+
+  function buildEditorState(doc, lang) {
+    return EditorState.create({
+      doc,
+      extensions: [
+        basicSetup,
+        oneDark,
+        getLanguageExtension(lang),
+        EditorView.theme({
+          "&": { fontSize: "14px" },
+          ".cm-content": {
+            fontFamily: "JetBrains Mono, Fira Code, monospace",
+            padding: "10px 0"
+          },
+          ".cm-line": { padding: "0 16px" },
+        }),
+        EditorState.tabSize.of(4),
+        keymap.of([indentWithTab]),
+        EditorView.updateListener.of((update) => {
+          if (!update.docChanged || suppressRef.current) return
+          update.transactions.forEach(tr => {
+            if (!tr.docChanged) return
+            tr.changes.iterChanges((fromA, toA, fromB, toB, inserted) => {
+              const removedText = tr.startState.doc.sliceString(fromA, toA)
+              const insertedText = inserted.toString()
+              if (removedText.length > 0) {
+                sendOp({ type: 'delete', pos: fromA, chars: removedText })
+              }
+              if (insertedText.length > 0) {
+                sendOp({ type: 'insert', pos: fromB, chars: insertedText })
+              }
+            })
+          })
+        }),
+        EditorView.domEventHandlers({
+          keyup: () => {
+            if (!viewRef.current) return
+            const pos = viewRef.current.state.selection.main.head
+            const line = viewRef.current.state.doc.lineAt(pos)
+            socketRef.current?.emit('cursor', {
+              room_id: roomId,
+              line: line.number - 1,
+              ch: pos - line.from
+            })
+          }
+        })
+      ]
+    })
+  }
 
   useEffect(() => {
     const socket = io()
     socketRef.current = socket
 
     const view = new EditorView({
-      state: EditorState.create({
-        doc: '',
-        extensions: [
-          basicSetup,
-          oneDark,
-          python(),
-          EditorView.theme({
-            "&": { fontSize: "14px" },
-            ".cm-content": {
-              fontFamily: "JetBrains Mono, Fira Code, monospace",
-              padding: "10px 0"
-            },
-            ".cm-line": { padding: "0 16px" },
-          }),
-          EditorState.tabSize.of(4),
-          keymap.of([indentWithTab]),
-          EditorView.updateListener.of((update) => {
-            if (!update.docChanged || suppressRef.current) return
-            update.transactions.forEach(tr => {
-              if (!tr.docChanged) return
-              tr.changes.iterChanges((fromA, toA, fromB, toB, inserted) => {
-                const removedText = tr.startState.doc.sliceString(fromA, toA)
-                const insertedText = inserted.toString()
-
-                if (removedText.length > 0) {
-                  sendOp({ type: 'delete', pos: fromA, chars: removedText })
-                }
-                if (insertedText.length > 0) {
-                  sendOp({ type: 'insert', pos: fromB, chars: insertedText })
-                }
-              })
-            })
-          }),
-          EditorView.domEventHandlers({
-            keyup: () => {
-              const pos = view.state.selection.main.head
-              const line = view.state.doc.lineAt(pos)
-              socket.emit('cursor', {
-                room_id: roomId,
-                line: line.number - 1,
-                ch: pos - line.from
-              })
-            }
-          })
-        ]
-      }),
+      state: buildEditorState('', 'python'),
       parent: editorRef.current
     })
-
     viewRef.current = view
 
     socket.emit('join', { room_id: roomId, username })
@@ -158,6 +169,16 @@ export default function Editor() {
     }
   }, [roomId])
 
+  // Rebuild editor when language changes
+  useEffect(() => {
+    if (!viewRef.current) return
+    languageRef.current = language
+    const currentDoc = viewRef.current.state.doc.toString()
+    suppressRef.current = true
+    viewRef.current.setState(buildEditorState(currentDoc, language))
+    suppressRef.current = false
+  }, [language])
+
   function sendOp(op) {
     if (!pendingOpRef.current) {
       pendingOpRef.current = op
@@ -186,6 +207,58 @@ export default function Editor() {
       .slice(0, 2)
   }
 
+  async function runCode() {
+  if (!viewRef.current) return
+  const code = viewRef.current.state.doc.toString()
+  setIsRunning(true)
+  setOutput('')
+
+  if (language === 'javascript') {
+    try {
+      const logs = []
+      const originalLog = console.log
+      console.log = (...args) => logs.push(args.map(String).join(' '))
+      eval(code)
+      console.log = originalLog
+      setOutput(logs.join('\n') || 'Code ran successfully with no output.')
+    } catch (err) {
+      setOutput(`Error: ${err.message}`)
+    }
+    setIsRunning(false)
+    return
+  }
+
+  if (language === 'python') {
+    try {
+      if (!window.pyodide) {
+        setOutput('Loading Python runtime... (first time only, ~10 seconds)')
+        const script = document.createElement('script')
+        script.src = 'https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js'
+        document.head.appendChild(script)
+        await new Promise(resolve => script.onload = resolve)
+        window.pyodide = await window.loadPyodide()
+      }
+
+      // Capture stdout properly using StringIO
+      const output = await window.pyodide.runPythonAsync(`
+import sys
+from io import StringIO
+_stdout = StringIO()
+sys.stdout = _stdout
+try:
+${code.split('\n').map(line => '    ' + line).join('\n')}
+finally:
+    sys.stdout = sys.__stdout__
+_stdout.getvalue()
+      `)
+      setOutput(output || 'Code ran successfully with no output.')
+    } catch (err) {
+      setOutput(`Error: ${err.message}`)
+    }
+    setIsRunning(false)
+  }
+}
+
   return (
     <div className="h-screen bg-gray-950 flex flex-col">
       {/* Topbar */}
@@ -207,6 +280,13 @@ export default function Editor() {
           <option value="python">Python</option>
           <option value="javascript">JavaScript</option>
         </select>
+        <button
+          onClick={runCode}
+          disabled={isRunning}
+          className="text-xs px-3 py-1.5 rounded-md bg-green-700 hover:bg-green-600 disabled:bg-green-900 disabled:text-green-700 text-white transition-colors font-medium"
+        >
+          {isRunning ? 'Running...' : '▶ Run'}
+        </button>
         <div className="ml-auto flex items-center gap-2">
           {users.map((u, i) => (
             <div
@@ -220,20 +300,37 @@ export default function Editor() {
         </div>
       </div>
 
-      {/* Editor */}
-      <div className="flex-1 overflow-hidden relative">
-        <div ref={editorRef} className="h-full overflow-auto" />
-        {/* Remote cursors */}
-        {Object.entries(cursors).map(([name, pos]) => (
-          <div
-            key={name}
-            className="absolute pointer-events-none text-xs bg-purple-600 text-white px-1.5 py-0.5 rounded font-medium"
-            style={{ top: `${pos.line * 20 + 8}px`, left: `${pos.ch * 8 + 16}px` }}
-            title={name}
-          >
-            {getInitials(name)}
+      {/* Editor + Output */}
+      <div className="flex-1 overflow-hidden flex flex-col">
+        <div className="flex-1 overflow-hidden relative">
+          <div ref={editorRef} className="h-full overflow-auto" />
+          {Object.entries(cursors).map(([name, pos]) => (
+            <div
+              key={name}
+              className="absolute pointer-events-none text-xs bg-purple-600 text-white px-1.5 py-0.5 rounded font-medium"
+              style={{ top: `${pos.line * 20 + 8}px`, left: `${pos.ch * 8 + 16}px` }}
+              title={name}
+            >
+              {getInitials(name)}
+            </div>
+          ))}
+        </div>
+
+        {/* Output panel */}
+        {output && (
+          <div className="border-t border-gray-800 bg-gray-900 p-4 max-h-48 overflow-auto">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-medium text-gray-400">Output</span>
+              <button
+                onClick={() => setOutput('')}
+                className="text-xs text-gray-500 hover:text-gray-300"
+              >
+                Clear
+              </button>
+            </div>
+            <pre className="text-sm font-mono text-green-400 whitespace-pre-wrap">{output}</pre>
           </div>
-        ))}
+        )}
       </div>
 
       {/* Status bar */}
